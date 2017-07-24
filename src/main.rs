@@ -298,6 +298,9 @@ impl Game {
     fn make_move(&mut self, direction: Direction) {
         self.state.player.direction = direction;
     }
+    fn game_over(&self) -> bool {
+        self.state.stars.iter().all(|s| self.state.goals.contains(&Goal::new(s.position)))
+    }
 }
 
 fn load_levels(levels: &str) -> Result<Vec<Level>, String> {

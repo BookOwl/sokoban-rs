@@ -27,9 +27,12 @@ macro_rules! rect {
 const LEVELS: &'static str = include_str!("../levels.txt");
 const SPRITESHEET_PATH: &'static str = "resources/images/sokoban_spritesheet.png";
 const FONT_PATH: &'static str = "resources/font/swansea.ttf";
+const WIDTH: u32 = 900;
+const HEIGHT: u32 = 675;
 
 lazy_static! {
-    static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
+    //static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
+    static ref BACKGROUND_COLOR: Color = Color::RGB(115, 139, 139);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,11 +363,12 @@ fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, 
 }
 
 fn main() {
+    let mut level_number: i32 = 0;
     let parsed_levels = load_levels(LEVELS).unwrap();
-    let mut game = Game::from_level(parsed_levels[1].clone());
-    let (width, height) = (800, 600);
-    let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", width, height).unwrap();
+    let mut game = Game::from_level(parsed_levels[level_number as usize].clone());
+    let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", WIDTH, HEIGHT).unwrap();
     let texture_creator = canvas.texture_creator();
+    let font = ttf_context.load_font(FONT_PATH, 32).unwrap();
     let mut clock = FpsClock::new(60);
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -372,15 +376,30 @@ fn main() {
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'main
                 },
+                Event::KeyDown { keycode: Some(Keycode::N), .. } => {
+                    let len = parsed_levels.len() as i32;
+                    level_number = (level_number + len + 1) % len;
+                    game = Game::from_level(parsed_levels[level_number as usize].clone());
+                },
+                Event::KeyDown { keycode: Some(Keycode::P), .. } => {
+                    let len = parsed_levels.len() as i32;
+                    level_number = (level_number + len - 1) % len;
+                    game = Game::from_level(parsed_levels[level_number as usize].clone());
+                }
                 event => game.step(&event),
             }
         }
         let level_surf = game.render_to_surface(SPRITESHEET_PATH);
-        let center_rect = Rect::from_center(Point::new((width/2) as i32, (height/2) as i32), level_surf.width(), level_surf.height());
+        let center_rect = Rect::from_center(Point::new((WIDTH/2) as i32, (HEIGHT/2) as i32), level_surf.width(), level_surf.height());
         let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();
+        let text_texture = texture_creator.create_texture_from_surface(
+                                font.render(&format!("Level {}", level_number+1))
+                                    .blended(Color::RGB(0, 0, 0)).unwrap()
+                            ).unwrap();
         canvas.set_draw_color(*BACKGROUND_COLOR);
         canvas.clear();
         canvas.copy(&level_texture, None, Some(center_rect)).expect("Render failed");
+        canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).unwrap();
         canvas.present();
         clock.tick();
     }

@@ -29,7 +29,6 @@ const SPRITESHEET_PATH: &'static str = "resources/images/sokoban_spritesheet.png
 const FONT_PATH: &'static str = "resources/font/swansea.ttf";
 
 lazy_static! {
-    static ref FLOOR_GRAY: Color = Color::RGB(128, 128, 128);
     static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
 }
 
@@ -235,6 +234,72 @@ impl Level {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Game {
+    level: Level,
+    state: GameState,
+}
+impl Game {
+    fn new(level: Level, state: GameState) -> Game {
+        Game { level, state }
+    }
+    fn from_level(level: Level) -> Game {
+        Game::new(level.clone(), level.start_state)
+    }
+    fn step(&mut self, event: &Event) {
+        match *event {
+            Event::KeyDown{keycode: Some(Keycode::Up), ..} => self.make_move(Direction::Up),
+            Event::KeyDown{keycode: Some(Keycode::Down), ..} => self.make_move(Direction::Down),
+            Event::KeyDown{keycode: Some(Keycode::Left), ..} => self.make_move(Direction::Left),
+            Event::KeyDown{keycode: Some(Keycode::Right), ..} => self.make_move(Direction::Right),
+            _ => ()
+        }
+    }
+    fn render_to_surface(&self, spritesheet_path: &str) -> Surface<'static> {
+        let level = &self.level;
+        let state = &self.state;
+        let map = &level.map;
+        let surf = Surface::new((level.width * 64) as u32, 
+                                    (level.height * 64) as u32, 
+                                    PixelFormatEnum::ABGR1555 /* <- I have no clue if this is right or not */).unwrap();
+        let mut canvas = surf.into_canvas().unwrap();
+        let texture_creator = canvas.texture_creator();
+        let spritesheet = texture_creator.load_texture(spritesheet_path).unwrap();
+        canvas.set_draw_color(*BACKGROUND_COLOR);
+        canvas.clear();
+        for (y, row) in map.iter().enumerate() {
+            for (x, tile) in row.iter().enumerate() {
+                match *tile {
+                    Tile::OutsideFloor => (),
+                    Tile::InsideFloor | Tile::Wall => {
+                        canvas.copy(&spritesheet, tile.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
+                    },
+                    _ => ()
+                }
+            }
+        }
+        for goal in &state.goals {
+            let (x, y) = (&goal.position.x, &goal.position.y);
+            canvas.copy(&spritesheet, Tile::Goal.spritesheet_rect(), rect!(x*64+22, y*64+22, 20, 20)).unwrap();
+        }
+        for star in &state.stars {
+            let (x, y) = (&star.position.x, &star.position.y);
+            canvas.copy(&spritesheet, Tile::Star.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
+        }
+        let player = state.player;
+        let (player_x, player_y) = (player.position.x, player.position.y);
+        let player_rect = player.spritesheet_rect();
+        let w = player_rect.width();
+        let h = player_rect.height();
+        let r = Rect::from_center(Point::new((player_x*64+32) as i32, (player_y*64+32) as i32), w, h);
+        canvas.copy(&spritesheet, player_rect, r).unwrap();
+        canvas.into_surface()
+    }
+    fn make_move(&mut self, direction: Direction) {
+        self.state.player.direction = direction;
+    }
+}
+
 fn load_levels(levels: &str) -> Result<Vec<Level>, String> {
     let mut parsed_levels = Vec::new();
     let mut map_lines = Vec::new();
@@ -273,45 +338,6 @@ fn floodfill<T: PartialEq + Copy>(map: &mut Vec<Vec<T>>, old: T, new: T, x: usiz
     }
 }
 
-fn render_level_to_surface(level: &Level, game_state: &GameState, spritesheet_path: &str) -> Surface<'static> {
-    let map = &level.map;
-    let surf = Surface::new((level.width * 64) as u32, 
-                                (level.height * 64) as u32, 
-                                PixelFormatEnum::ABGR1555 /* <- I have no clue if this is right or not */).unwrap();
-    let mut canvas = surf.into_canvas().unwrap();
-    let texture_creator = canvas.texture_creator();
-    let spritesheet = texture_creator.load_texture(spritesheet_path).unwrap();
-    canvas.set_draw_color(*BACKGROUND_COLOR);
-    canvas.clear();
-    for (y, row) in map.iter().enumerate() {
-        for (x, tile) in row.iter().enumerate() {
-            match *tile {
-                Tile::OutsideFloor => (),
-                Tile::InsideFloor | Tile::Wall => {
-                    canvas.copy(&spritesheet, tile.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
-                },
-                _ => ()
-            }
-        }
-    }
-    for goal in &game_state.goals {
-        let (x, y) = (&goal.position.x, &goal.position.y);
-        canvas.copy(&spritesheet, Tile::Goal.spritesheet_rect(), rect!(x*64+22, y*64+22, 20, 20)).unwrap();
-    }
-    for star in &game_state.stars {
-        let (x, y) = (&star.position.x, &star.position.y);
-        canvas.copy(&spritesheet, Tile::Star.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
-    }
-    let player = game_state.player;
-    let (player_x, player_y) = (player.position.x, player.position.y);
-    let player_rect = player.spritesheet_rect();
-    let w = player_rect.width();
-    let h = player_rect.height();
-    let r = Rect::from_center(Point::new((player_x*64+32) as i32, (player_y*64+32) as i32), w, h);
-    canvas.copy(&spritesheet, player_rect, r).unwrap();
-    canvas.into_surface()
-}
-
 
 fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, EventPump, Sdl2TtfContext), String> {
     let sdl_context = sdl2::init()?;
@@ -330,16 +356,9 @@ fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, 
     Ok((canvas, event_pump, ttf_context))
 }
 
-fn rect_at_center_of(pos: Position, w: u32, h: u32) -> Rect {
-    let topleft_x = pos.x as u32 - w/2;
-    let topleft_y = pos.y as u32 - h/2;
-    rect!(topleft_x, topleft_y, w, h)
-}
-
 fn main() {
-    let mut parsed_levels = load_levels(LEVELS).unwrap();
-    let level = &mut parsed_levels[2];
-    let game_state = &level.start_state;
+    let parsed_levels = load_levels(LEVELS).unwrap();
+    let mut game = Game::from_level(parsed_levels[1].clone());
     let (width, height) = (800, 600);
     let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", width, height).unwrap();
     let texture_creator = canvas.texture_creator();
@@ -350,11 +369,11 @@ fn main() {
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'main
                 },
-                _ => {}
+                event => game.step(&event),
             }
         }
-        let level_surf = render_level_to_surface(level, game_state, SPRITESHEET_PATH);
-        let center_rect = rect_at_center_of(Position::new((width/2) as usize, (height/2) as usize), level_surf.width(), level_surf.height());
+        let level_surf = game.render_to_surface(SPRITESHEET_PATH);
+        let center_rect = Rect::from_center(Point::new((width/2) as i32, (height/2) as i32), level_surf.width(), level_surf.height());
         let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();
         canvas.set_draw_color(*BACKGROUND_COLOR);
         canvas.clear();

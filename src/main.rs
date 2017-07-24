@@ -1,16 +1,37 @@
 extern crate sdl2;
 extern crate fps_clock;
+#[macro_use]
+extern crate lazy_static;
+
+use std::cmp::PartialEq;
 
 use sdl2::video::Window;
 use sdl2::render::Canvas;
+use sdl2::render::Texture;
 use sdl2::EventPump;
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::image::{LoadTexture, INIT_PNG};
-use sdl2::rect::Rect;
+use sdl2::rect::{Rect, Point};
+use sdl2::ttf::Sdl2TtfContext;
+use sdl2::surface::Surface;
+use sdl2::pixels::PixelFormatEnum;
 
 use fps_clock::FpsClock;
+
+macro_rules! rect {
+    ($x:expr, $y:expr, $w:expr, $h:expr) => (Rect::new($x as i32, $y as i32, $w as u32, $h as u32))
+}
+
+const LEVELS: &'static str = include_str!("../levels.txt");
+const SPRITESHEET_PATH: &'static str = "resources/images/sokoban_spritesheet.png";
+const FONT_PATH: &'static str = "resources/font/swansea.ttf";
+
+lazy_static! {
+    static ref FLOOR_GRAY: Color = Color::RGB(128, 128, 128);
+    static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Direction {
@@ -28,7 +49,8 @@ enum Tile {
     Star,
     StarOnGoal,
     Goal,
-    Floor,
+    OutsideFloor,
+    InsideFloor
 }
 impl Tile {
     /// Character to tile mapping taken from http://sokobano.de/wiki/index.php?title=Level_format
@@ -41,20 +63,29 @@ impl Tile {
             '$' => Ok(Tile::Star),
             '*' => Ok(Tile::StarOnGoal),
             '.' => Ok(Tile::Goal),
-            ' ' => Ok(Tile::Floor),
+            ' ' => Ok(Tile::OutsideFloor),
             _ => Err(format!("'{}' is an invalid tile", c)),
         }
     }
     fn to_char(&self) -> char {
-        use Tile::*;
         match *self {
-            Wall => '#',
-            Player => '@',
-            PlayerOnGoal => '+',
-            Star => '$',
-            StarOnGoal => '*',
-            Goal => '.',
-            Floor => ' ',
+            Tile::Wall => '#',
+            Tile::Player => '@',
+            Tile::PlayerOnGoal => '+',
+            Tile::Star => '$',
+            Tile::StarOnGoal => '*',
+            Tile::Goal => '.',
+            Tile::OutsideFloor => '~',
+            Tile::InsideFloor => ' ',
+        }
+    }
+    fn spritesheet_rect(&self) -> Rect {
+        match *self {
+            Tile::Wall => rect!(448, 64, 64, 64),
+            Tile::PlayerOnGoal | Tile::Goal | Tile::StarOnGoal => rect!(60, 576, 20, 20),
+            Tile::Star => rect!(384, 0, 64, 64),
+            Tile::InsideFloor => rect!(192, 528, 64, 64),
+            _ => panic!()
         }
     }
 }
@@ -93,6 +124,14 @@ impl Player {
     fn move_in_direction(&self, direction: Direction) -> Player {
         Player::new(self.position.move_in_direction(direction), direction)
     }
+    fn spritesheet_rect(&self) -> Rect {
+        match self.direction {
+            Direction::Down => rect!(554, 208, 42, 50),
+            Direction::Left => rect!(543, 440, 45, 50),
+            Direction::Right => rect!(512, 108, 45, 50),
+            Direction::Up => rect!(554, 158, 42, 50),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,15 +147,26 @@ impl Star {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Goal {
+    position: Position
+}
+impl Goal {
+    fn new(position: Position) -> Goal {
+        Goal { position }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GameState {
     player: Player,
     stars: Vec<Star>,
+    goals: Vec<Goal>,
     steps: usize,
 }
 impl GameState {
-    fn new(player: Player, stars: Vec<Star>, steps: usize) -> GameState {
-        GameState { player, stars, steps }
+    fn new(player: Player, stars: Vec<Star>, goals: Vec<Goal>,  steps: usize) -> GameState {
+        GameState { player, stars, goals, steps }
     }
 }
 
@@ -135,30 +185,42 @@ impl Level {
                                 .ok_or_else(|| "Invalid level: Level is empty")?;
         let mut map = Vec::with_capacity(lines.len());
         let mut stars = Vec::new();
+        let mut goals = Vec::new();
         let mut player_pos = None;
         for (y, line) in lines.iter().enumerate() {
             let mut row = Vec::with_capacity(line.len());
             for (x, tile) in line.chars().enumerate() {
                 let tile = Tile::from_char(tile)?;
-                row.push(tile);
                 if tile == Tile::Player || tile == Tile::PlayerOnGoal {
                     // This tile is the starting position
                     player_pos = Some(Position::new(x, y));
+                    row.push(Tile::OutsideFloor);
                 } else if tile == Tile::Star || tile == Tile::StarOnGoal {
                     stars.push(Star::new(Position::new(x, y)));
+                    row.push(Tile::OutsideFloor);
+                } else if tile == Tile::PlayerOnGoal 
+                          || tile == Tile::StarOnGoal 
+                          || tile == Tile::Goal {
+                    goals.push(Goal::new(Position::new(x, y)));
+                    row.push(Tile::OutsideFloor);
+                } else {
+                    row.push(tile);
                 }
             }
             if line.len() < longest_line_len {
                 for _ in 0..(longest_line_len - line.len()) {
-                    row.push(Tile::Floor);
+                    row.push(Tile::OutsideFloor);
                 }
             }
             map.push(row);
         }
-        let start_state = GameState::new(Player::new(player_pos.ok_or_else(|| "Invalid level: Level has no starting position")?, Direction::Left),
+        let pos = player_pos.ok_or_else(|| "Invalid level: Level has no starting position")?;
+        let start_state = GameState::new(Player::new(pos, Direction::Right),
                                          stars,
+                                         goals,
                                          0);
         let height = map.len();
+        floodfill(&mut map, Tile::OutsideFloor, Tile::InsideFloor, pos.x, pos.y);
         Ok(Level { map, width: longest_line_len, height, start_state})
     }
     fn as_string(&self) -> String {
@@ -193,8 +255,65 @@ fn load_levels(levels: &str) -> Result<Vec<Level>, String> {
     Ok(parsed_levels)
 }
 
+fn floodfill<T: PartialEq + Copy>(map: &mut Vec<Vec<T>>, old: T, new: T, x: usize, y: usize) {
+    if map[y][x] == old {
+        map[y][x] = new;
+    }
+    if x > 0 && map[y][x-1] == old {
+        floodfill(map, old, new, x-1, y);
+    }
+    if x + 1 < map[y].len() && map[y][x+1] == old {
+        floodfill(map, old, new, x+1, y);
+    }
+    if y > 0 && map[y-1][x] == old {
+        floodfill(map, old, new, x, y-1)
+    }
+    if y + 1 < map.len() && map[y+1][x] == old {
+        floodfill(map, old, new, x, y+1)
+    }
+}
 
-fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, EventPump), String> {
+fn render_level_to_surface(level: &Level, game_state: &GameState, spritesheet_path: &str) -> Surface<'static> {
+    let map = &level.map;
+    let surf = Surface::new((level.width * 64) as u32, 
+                                (level.height * 64) as u32, 
+                                PixelFormatEnum::ABGR1555 /* <- I have no clue if this is right or not */).unwrap();
+    let mut canvas = surf.into_canvas().unwrap();
+    let texture_creator = canvas.texture_creator();
+    let spritesheet = texture_creator.load_texture(spritesheet_path).unwrap();
+    canvas.set_draw_color(*BACKGROUND_COLOR);
+    canvas.clear();
+    for (y, row) in map.iter().enumerate() {
+        for (x, tile) in row.iter().enumerate() {
+            match *tile {
+                Tile::OutsideFloor => (),
+                Tile::InsideFloor | Tile::Wall => {
+                    canvas.copy(&spritesheet, tile.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
+                },
+                _ => ()
+            }
+        }
+    }
+    for goal in &game_state.goals {
+        let (x, y) = (&goal.position.x, &goal.position.y);
+        canvas.copy(&spritesheet, Tile::Goal.spritesheet_rect(), rect!(x*64+22, y*64+22, 20, 20)).unwrap();
+    }
+    for star in &game_state.stars {
+        let (x, y) = (&star.position.x, &star.position.y);
+        canvas.copy(&spritesheet, Tile::Star.spritesheet_rect(), rect!(x*64, y*64, 64, 64)).unwrap();
+    }
+    let player = game_state.player;
+    let (player_x, player_y) = (player.position.x, player.position.y);
+    let player_rect = player.spritesheet_rect();
+    let w = player_rect.width();
+    let h = player_rect.height();
+    let r = Rect::from_center(Point::new((player_x*64+32) as i32, (player_y*64+32) as i32), w, h);
+    canvas.copy(&spritesheet, player_rect, r).unwrap();
+    canvas.into_surface()
+}
+
+
+fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, EventPump, Sdl2TtfContext), String> {
     let sdl_context = sdl2::init()?;
     let _image_context = sdl2::image::init(INIT_PNG)?;
     let video_subsystem = sdl_context.video()?;
@@ -207,11 +326,8 @@ fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, 
 
     let canvas = window.into_canvas().build().map_err(|e| format!("{}", e))?;
     let event_pump = sdl_context.event_pump()?;
-    Ok((canvas, event_pump))
-}
-
-macro_rules! rect {
-    ($x:expr, $y:expr, $w:expr, $h:expr) => (Rect::new($x as i32, $y as i32, $w as u32, $h as u32))
+    let ttf_context = sdl2::ttf::init().map_err(|e| format!("{}", e))?;
+    Ok((canvas, event_pump, ttf_context))
 }
 
 fn rect_at_center_of(pos: Position, w: u32, h: u32) -> Rect {
@@ -220,16 +336,13 @@ fn rect_at_center_of(pos: Position, w: u32, h: u32) -> Rect {
     rect!(topleft_x, topleft_y, w, h)
 }
 
-const LEVELS: &'static str = include_str!("../levels.txt");
-const SPRITE_PATH: &'static str = "resources/images/sokoban_spritesheet.png";
-
 fn main() {
+    let mut parsed_levels = load_levels(LEVELS).unwrap();
+    let level = &mut parsed_levels[2];
+    let game_state = &level.start_state;
     let (width, height) = (800, 600);
-    let parsed_levels = load_levels(LEVELS).unwrap();
-    let (mut canvas, mut event_pump) = init_sdl("Sokoban", width, height).unwrap();
+    let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", width, height).unwrap();
     let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.load_texture(SPRITE_PATH).unwrap();
-    let center_rect = rect_at_center_of(Position::new((width/2) as usize, (height/2) as usize), width/2, height/2);
     let mut clock = FpsClock::new(60);
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -240,9 +353,12 @@ fn main() {
                 _ => {}
             }
         }
-        canvas.set_draw_color(Color::RGB(29, 167, 226));
+        let level_surf = render_level_to_surface(level, game_state, SPRITESHEET_PATH);
+        let center_rect = rect_at_center_of(Position::new((width/2) as usize, (height/2) as usize), level_surf.width(), level_surf.height());
+        let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();
+        canvas.set_draw_color(*BACKGROUND_COLOR);
         canvas.clear();
-        canvas.copy(&texture, None, Some(center_rect)).expect("Render failed");
+        canvas.copy(&level_texture, None, Some(center_rect)).expect("Render failed");
         canvas.present();
         clock.tick();
     }

@@ -29,6 +29,10 @@ const SPRITESHEET_PATH: &'static str = "resources/images/sokoban_spritesheet.png
 const FONT_PATH: &'static str = "resources/font/swansea.ttf";
 const WIDTH: u32 = 900;
 const HEIGHT: u32 = 675;
+const HALF_WIDTH: u32 = 450;
+const HALF_HEIGHT: u32 = 337;
+const TILE_WIDTH: u32 = 64;
+const TILE_HEIGHT: u32 = 64;
 
 lazy_static! {
     //static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
@@ -41,6 +45,16 @@ enum Direction {
     Down,
     Left,
     Right
+}
+impl Direction {
+    fn as_offset(&self) -> (i32, i32) {
+        match *self {
+            Direction::Up => (0, -1),
+            Direction::Right => (1, 0),
+            Direction::Down => (0, 1),
+            Direction::Left => (-1, 0),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +120,7 @@ impl Position {
             Direction::Down => Position {y: self.y+1, ..*self},
             Direction::Up => Position {y: self.y-1, ..*self},
             Direction::Left => Position {x: self.x-1, ..*self},
-            Direction::Right => Position {x: self.x-1, ..*self},
+            Direction::Right => Position {x: self.x+1, ..*self},
         }
     }
 }
@@ -235,27 +249,106 @@ impl Level {
         }
         map
     }
+    fn is_wall(&self, x: i32, y: i32) -> bool {
+        if y < 0 || y >= self.height as i32 || x < 0 || x > self.height as i32{
+            false
+        } else {
+            self.map[y as usize][x as usize] == Tile::Wall
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Camera {
+    x_offset: i32,
+    y_offset: i32,
+    max_x_pan: i32,
+    max_y_pan: i32,
+    speed: i32,
+}
+impl Camera {
+    fn new(x_offset: i32, y_offset: i32, max_x_pan: i32, max_y_pan: i32, speed: i32) -> Camera {
+        Camera {
+            x_offset,
+            y_offset,
+            max_x_pan,
+            max_y_pan,
+            speed,
+        }
+    }
+    fn move_up(&mut self) {
+        if self.y_offset < self.max_y_pan {
+            self.y_offset += self.speed;
+        }
+    }
+    fn move_down(&mut self) {
+        if self.y_offset > -self.max_y_pan {
+            self.y_offset -= self.speed;
+        }
+    }
+    fn move_right(&mut self) {
+        if self.x_offset > -self.max_x_pan {
+            self.x_offset -= self.speed;
+        }
+    }
+    fn move_left(&mut self) {
+        if self.x_offset < self.max_x_pan {
+            self.x_offset += self.speed;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Game {
     level: Level,
     state: GameState,
+    camera: Camera,
+    camera_moving: bool,
+    camera_direction: Direction,
 }
 impl Game {
-    fn new(level: Level, state: GameState) -> Game {
-        Game { level, state }
+    fn new(level: Level, state: GameState, camera: Camera) -> Game {
+        Game { level, state, camera, camera_moving: false, camera_direction: Direction::Left}
     }
     fn from_level(level: Level) -> Game {
-        Game::new(level.clone(), level.start_state)
+        let h = level.height;
+        let w = level.width;
+        Game::new(level.clone(), 
+                  level.start_state, 
+                  Camera::new(0, 
+                              0, 
+                              (HALF_HEIGHT as i32 - (h/2) as i32).abs() + TILE_HEIGHT as i32,
+                              (HALF_WIDTH as i32 - (w/2) as i32).abs() + TILE_WIDTH as i32,
+                              5))
     }
     fn step(&mut self, event: &Event) {
+        if self.camera_moving {
+            let d = self.camera_direction;
+            self.move_camera(d);
+        }
         match *event {
+            Event::KeyUp{..} => self.camera_moving = false,
+            // Move the player
             Event::KeyDown{keycode: Some(Keycode::Up), ..} => self.make_move(Direction::Up),
             Event::KeyDown{keycode: Some(Keycode::Down), ..} => self.make_move(Direction::Down),
             Event::KeyDown{keycode: Some(Keycode::Left), ..} => self.make_move(Direction::Left),
             Event::KeyDown{keycode: Some(Keycode::Right), ..} => self.make_move(Direction::Right),
+            // Move the camera
+            Event::KeyDown{keycode: Some(Keycode::W), ..} => self.move_camera(Direction::Up),
+            Event::KeyDown{keycode: Some(Keycode::S), ..} => self.move_camera(Direction::Down),
+            Event::KeyDown{keycode: Some(Keycode::A), ..} => self.move_camera(Direction::Left),
+            Event::KeyDown{keycode: Some(Keycode::D), ..} => self.move_camera(Direction::Right),
             _ => ()
+        }
+    }
+    fn move_camera(&mut self, dir: Direction) {
+        self.camera_direction = dir;
+        self.camera_moving = true;
+        match dir {
+            Direction::Up => self.camera.move_up(),
+            Direction::Down => self.camera.move_down(),
+            Direction::Left => self.camera.move_left(),
+            Direction::Right => self.camera.move_right(),
         }
     }
     fn render_to_surface(&self, spritesheet_path: &str) -> Surface<'static> {
@@ -298,8 +391,26 @@ impl Game {
         canvas.copy(&spritesheet, player_rect, r).unwrap();
         canvas.into_surface()
     }
-    fn make_move(&mut self, direction: Direction) {
+    fn make_move(&mut self, direction: Direction) -> () {
         self.state.player.direction = direction;
+        let (x_off, y_off) = direction.as_offset();
+        let (new_x, new_y) = (self.state.player.position.x as i32 + x_off, 
+                              self.state.player.position.y as i32 + y_off);
+        if !self.level.is_wall(new_x, new_y) {
+            let star = Star::new(Position::new(new_x as usize, new_y as usize));
+            if self.state.stars.contains(&star) {
+                if !self.is_blocked(new_x + x_off, new_y + y_off) {
+                    let ind = self.state.stars.iter().position(|&s| s == star).unwrap();
+                    self.state.stars[ind] = self.state.stars[ind].move_in_direction(direction);
+                } else {
+                    return
+                }
+            }
+            self.state.player = self.state.player.move_in_direction(direction);
+        }
+    }
+    fn is_blocked(&self, x: i32, y: i32) -> bool {
+        self.level.is_wall(x, y) || self.state.stars.contains(&Star::new(Position::new(x as usize, y as usize)))
     }
     fn game_over(&self) -> bool {
         self.state.stars.iter().all(|s| self.state.goals.contains(&Goal::new(s.position)))
@@ -390,6 +501,8 @@ fn main() {
             }
         }
         let level_surf = game.render_to_surface(SPRITESHEET_PATH);
+        let mut rect = level_surf.rect();
+        rect.center_on(Point::new(HALF_WIDTH as i32 + game.camera.x_offset, HALF_HEIGHT as i32 + game.camera.y_offset));
         let center_rect = Rect::from_center(Point::new((WIDTH/2) as i32, (HEIGHT/2) as i32), level_surf.width(), level_surf.height());
         let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();
         let text_texture = texture_creator.create_texture_from_surface(
@@ -398,7 +511,7 @@ fn main() {
                             ).unwrap();
         canvas.set_draw_color(*BACKGROUND_COLOR);
         canvas.clear();
-        canvas.copy(&level_texture, None, Some(center_rect)).expect("Render failed");
+        canvas.copy(&level_texture, None, Some(rect)).expect("Render failed");
         canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).unwrap();
         canvas.present();
         clock.tick();

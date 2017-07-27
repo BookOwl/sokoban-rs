@@ -412,7 +412,7 @@ impl Game {
     fn is_blocked(&self, x: i32, y: i32) -> bool {
         self.level.is_wall(x, y) || self.state.stars.contains(&Star::new(Position::new(x as usize, y as usize)))
     }
-    fn game_over(&self) -> bool {
+    fn solved(&self) -> bool {
         self.state.stars.iter().all(|s| self.state.goals.contains(&Goal::new(s.position)))
     }
 }
@@ -480,6 +480,7 @@ fn main() {
     let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", WIDTH, HEIGHT).unwrap();
     let texture_creator = canvas.texture_creator();
     let font = ttf_context.load_font(FONT_PATH, 32).unwrap();
+    let big_font = ttf_context.load_font(FONT_PATH, 64).unwrap();
     let mut clock = FpsClock::new(60);
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -503,7 +504,6 @@ fn main() {
         let level_surf = game.render_to_surface(SPRITESHEET_PATH);
         let mut rect = level_surf.rect();
         rect.center_on(Point::new(HALF_WIDTH as i32 + game.camera.x_offset, HALF_HEIGHT as i32 + game.camera.y_offset));
-        let center_rect = Rect::from_center(Point::new((WIDTH/2) as i32, (HEIGHT/2) as i32), level_surf.width(), level_surf.height());
         let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();
         let text_texture = texture_creator.create_texture_from_surface(
                                 font.render(&format!("Level {}", level_number+1))
@@ -514,6 +514,37 @@ fn main() {
         canvas.copy(&level_texture, None, Some(rect)).expect("Render failed");
         canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).unwrap();
         canvas.present();
+        if game.solved() {
+            let you_win_texture = texture_creator.create_texture_from_surface(
+                                big_font.render("You solved it!")
+                                    .blended(Color::RGB(0, 0, 0)).unwrap()
+                            ).unwrap();
+            let center_rect = Rect::from_center(Point::new((WIDTH/2) as i32, (HEIGHT/2) as i32), 
+                                                you_win_texture.query().width, 
+                                                you_win_texture.query().height);
+            canvas.clear();
+            canvas.copy(&level_texture, None, Some(rect)).expect("Render failed");
+            canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).expect("Render failed");
+            canvas.copy(&you_win_texture, None, Some(center_rect)).expect("Render failed");
+            canvas.present();
+            'you_win: loop {
+                for event in event_pump.poll_iter() {
+                    match event {
+                        Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                            break 'main
+                        },
+                        Event::KeyDown { .. } => {
+                            break 'you_win
+                        },
+                        _ => ()
+                    }
+                }
+                clock.tick()
+            }
+            let len = parsed_levels.len() as i32;
+            level_number = (level_number + len + 1) % len;
+            game = Game::from_level(parsed_levels[level_number as usize].clone());
+        }
         clock.tick();
     }
 }

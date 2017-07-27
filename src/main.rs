@@ -11,11 +11,13 @@ use sdl2::EventPump;
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::image::{LoadTexture, INIT_PNG};
+use sdl2::image::INIT_PNG;
 use sdl2::rect::{Rect, Point};
 use sdl2::ttf::Sdl2TtfContext;
 use sdl2::surface::Surface;
 use sdl2::pixels::PixelFormatEnum;
+use sdl2::rwops::RWops;
+use sdl2::image::ImageRWops;
 
 use fps_clock::FpsClock;
 
@@ -24,8 +26,8 @@ macro_rules! rect {
 }
 
 const LEVELS: &'static str = include_str!("../levels.txt");
-const SPRITESHEET_PATH: &'static str = "resources/images/sokoban_spritesheet.png";
-const FONT_PATH: &'static str = "resources/font/swansea.ttf";
+const SPRITESHEET_BYTES: &'static [u8] = include_bytes!("../resources/images/sokoban_spritesheet.png");
+const FONT_BYTES: &'static [u8] = include_bytes!("../resources/font/swansea.ttf");
 const WIDTH: u32 = 900;
 const HEIGHT: u32 = 675;
 const HALF_WIDTH: u32 = 450;
@@ -328,7 +330,7 @@ impl Game {
             Direction::Right => self.camera.move_right(),
         }
     }
-    fn render_to_surface(&self, spritesheet_path: &str) -> Surface<'static> {
+    fn render_to_surface<'a>(&self, spritesheet_surf: &Surface<'a>) -> Surface<'static> {
         let level = &self.level;
         let state = &self.state;
         let map = &level.map;
@@ -337,7 +339,7 @@ impl Game {
                                     PixelFormatEnum::ABGR1555 /* <- I have no clue if this is right or not */).unwrap();
         let mut canvas = surf.into_canvas().unwrap();
         let texture_creator = canvas.texture_creator();
-        let spritesheet = texture_creator.load_texture(spritesheet_path).unwrap();
+        let spritesheet = texture_creator.create_texture_from_surface(spritesheet_surf).unwrap();
         canvas.set_draw_color(*BACKGROUND_COLOR);
         canvas.clear();
         for (y, row) in map.iter().enumerate() {
@@ -455,9 +457,13 @@ fn main() {
     let parsed_levels = load_levels(LEVELS).unwrap();
     let mut game = Game::from_level(parsed_levels[level_number as usize].clone());
     let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", WIDTH, HEIGHT).unwrap();
+    let spritesheet_rw = RWops::from_bytes(&SPRITESHEET_BYTES).unwrap();
+    let spritesheet_surf = spritesheet_rw.load().unwrap();
+    let ttf_rw = RWops::from_bytes(&FONT_BYTES).unwrap();
     let texture_creator = canvas.texture_creator();
-    let font = ttf_context.load_font(FONT_PATH, 32).unwrap();
-    let big_font = ttf_context.load_font(FONT_PATH, 64).unwrap();
+    let font = ttf_context.load_font_from_rwops(ttf_rw, 32).unwrap();
+    let ttf_rw = RWops::from_bytes(&FONT_BYTES).unwrap();
+    let big_font = ttf_context.load_font_from_rwops(ttf_rw, 64).unwrap();
     let mut clock = FpsClock::new(60);
     'main: loop {
         for event in event_pump.poll_iter() {
@@ -485,7 +491,7 @@ fn main() {
                 event => game.step(&event),
             }
         }
-        let level_surf = game.render_to_surface(SPRITESHEET_PATH);
+        let level_surf = game.render_to_surface(&spritesheet_surf);
         let mut rect = level_surf.rect();
         rect.center_on(Point::new(HALF_WIDTH as i32 + game.camera.x_offset, HALF_HEIGHT as i32 + game.camera.y_offset));
         let level_texture = texture_creator.create_texture_from_surface(level_surf).unwrap();

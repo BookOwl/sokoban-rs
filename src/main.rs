@@ -488,16 +488,23 @@ fn main() {
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'main
                 },
+                // Move to the next level
                 Event::KeyDown { keycode: Some(Keycode::N), .. } => {
                     let len = parsed_levels.len() as i32;
                     level_number = (level_number + len + 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
                 },
+                // Move to the previous level
                 Event::KeyDown { keycode: Some(Keycode::B), .. } => {
                     let len = parsed_levels.len() as i32;
                     level_number = (level_number + len - 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
-                }
+                },
+                // Reset the level
+                Event::KeyDown { keycode: Some(Keycode::Backspace), .. } => {
+                    game = Game::from_level(parsed_levels[level_number as usize].clone());
+                },
+                // Handle the game event
                 event => game.step(&event),
             }
         }

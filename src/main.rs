@@ -493,7 +493,7 @@ fn main() {
                     level_number = (level_number + len + 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
                 },
-                Event::KeyDown { keycode: Some(Keycode::P), .. } => {
+                Event::KeyDown { keycode: Some(Keycode::B), .. } => {
                     let len = parsed_levels.len() as i32;
                     level_number = (level_number + len - 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());

@@ -519,13 +519,21 @@ fn main() {
                                 big_font.render("You solved it!")
                                     .blended(Color::RGB(0, 0, 0)).unwrap()
                             ).unwrap();
-            let center_rect = Rect::from_center(Point::new((WIDTH/2) as i32, (HEIGHT/2) as i32), 
+            let you_win_rect = Rect::from_center(Point::new(HALF_WIDTH as i32, (HALF_HEIGHT - you_win_texture.query().height) as i32), 
                                                 you_win_texture.query().width, 
                                                 you_win_texture.query().height);
+            let hit_key_texture = texture_creator.create_texture_from_surface(
+                                        font.render("Hit any key to move on")
+                                            .blended(Color::RGB(0, 0, 0)).unwrap()
+                                    ).unwrap();
+            let hit_key_rect = Rect::from_center(Point::new(HALF_WIDTH as i32, (HALF_HEIGHT + you_win_texture.query().height) as i32), 
+                                                hit_key_texture.query().width, 
+                                                hit_key_texture.query().height);
             canvas.clear();
             canvas.copy(&level_texture, None, Some(rect)).expect("Render failed");
             canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).expect("Render failed");
-            canvas.copy(&you_win_texture, None, Some(center_rect)).expect("Render failed");
+            canvas.copy(&you_win_texture, None, Some(you_win_rect)).expect("Render failed");
+            canvas.copy(&hit_key_texture, None, Some(hit_key_rect)).expect("Render failed");
             canvas.present();
             'you_win: loop {
                 for event in event_pump.poll_iter() {

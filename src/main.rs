@@ -36,7 +36,6 @@ const TILE_WIDTH: u32 = 64;
 const TILE_HEIGHT: u32 = 64;
 
 lazy_static! {
-    //static ref BACKGROUND_COLOR: Color = Color::RGB(45, 168, 18);
     static ref BACKGROUND_COLOR: Color = Color::RGB(115, 139, 139);
 }
 
@@ -434,7 +433,6 @@ fn floodfill<T: PartialEq + Copy>(map: &mut Vec<Vec<T>>, old: T, new: T, x: usiz
     }
 }
 
-
 fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, EventPump, Sdl2TtfContext), String> {
     let sdl_context = sdl2::init()?;
     let _image_context = sdl2::image::init(INIT_PNG)?;
@@ -453,6 +451,7 @@ fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, 
 }
 
 fn main() {
+    // Load all of the game resources and start the game
     let mut level_number: i32 = 0;
     let parsed_levels = load_levels(LEVELS).unwrap();
     let mut game = Game::from_level(parsed_levels[level_number as usize].clone());
@@ -464,33 +463,35 @@ fn main() {
     let font = ttf_context.load_font_from_rwops(ttf_rw, 32).unwrap();
     let ttf_rw = RWops::from_bytes(&FONT_BYTES).unwrap();
     let big_font = ttf_context.load_font_from_rwops(ttf_rw, 64).unwrap();
-    let mut clock = FpsClock::new(60);
+    let mut clock = FpsClock::new(30);
     'main: loop {
         for event in event_pump.poll_iter() {
             match event {
+                // The game exits when the user quits or hits the escape key
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'main
                 },
-                // Move to the next level
+                // Move to the next level if the user pressed N
                 Event::KeyDown { keycode: Some(Keycode::N), .. } => {
                     let len = parsed_levels.len() as i32;
                     level_number = (level_number + len + 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
                 },
-                // Move to the previous level
+                // Move to the previous level if the user pressed B
                 Event::KeyDown { keycode: Some(Keycode::B), .. } => {
                     let len = parsed_levels.len() as i32;
                     level_number = (level_number + len - 1) % len;
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
                 },
-                // Reset the level
+                // Reset the level if the user pressed Backspace
                 Event::KeyDown { keycode: Some(Keycode::Backspace), .. } => {
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
                 },
-                // Handle the game event
+                // Let the game object handle the event
                 event => game.step(&event),
             }
         }
+        // Render the new game state
         let level_surf = game.render_to_surface(&spritesheet_surf);
         let mut rect = level_surf.rect();
         rect.center_on(Point::new(HALF_WIDTH as i32 + game.camera.x_offset, HALF_HEIGHT as i32 + game.camera.y_offset));
@@ -519,12 +520,15 @@ fn main() {
             let hit_key_rect = Rect::from_center(Point::new(HALF_WIDTH as i32, (HALF_HEIGHT + you_win_texture.query().height) as i32), 
                                                 hit_key_texture.query().width, 
                                                 hit_key_texture.query().height);
+            // I'm not quite sure why I need to clear() and reblit the level texture,
+            // but if I don't the game shows the previous move before the user solved the level.
             canvas.clear();
             canvas.copy(&level_texture, None, Some(rect)).expect("Render failed");
             canvas.copy(&text_texture, None, Some(rect!(20, 20, text_texture.query().width, text_texture.query().height))).expect("Render failed");
             canvas.copy(&you_win_texture, None, Some(you_win_rect)).expect("Render failed");
             canvas.copy(&hit_key_texture, None, Some(hit_key_rect)).expect("Render failed");
             canvas.present();
+            // Loop until the user presses a key to move on.
             'you_win: loop {
                 for event in event_pump.poll_iter() {
                     match event {
@@ -539,6 +543,7 @@ fn main() {
                 }
                 clock.tick()
             }
+            // Move to the next level
             let len = parsed_levels.len() as i32;
             level_number = (level_number + len + 1) % len;
             game = Game::from_level(parsed_levels[level_number as usize].clone());

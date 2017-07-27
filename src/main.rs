@@ -7,7 +7,6 @@ use std::cmp::PartialEq;
 
 use sdl2::video::Window;
 use sdl2::render::Canvas;
-use sdl2::render::Texture;
 use sdl2::EventPump;
 use sdl2::pixels::Color;
 use sdl2::event::Event;
@@ -81,18 +80,6 @@ impl Tile {
             '.' => Ok(Tile::Goal),
             ' ' => Ok(Tile::OutsideFloor),
             _ => Err(format!("'{}' is an invalid tile", c)),
-        }
-    }
-    fn to_char(&self) -> char {
-        match *self {
-            Tile::Wall => '#',
-            Tile::Player => '@',
-            Tile::PlayerOnGoal => '+',
-            Tile::Star => '$',
-            Tile::StarOnGoal => '*',
-            Tile::Goal => '.',
-            Tile::OutsideFloor => '~',
-            Tile::InsideFloor => ' ',
         }
     }
     fn spritesheet_rect(&self) -> Rect {
@@ -238,16 +225,6 @@ impl Level {
         let height = map.len();
         floodfill(&mut map, Tile::OutsideFloor, Tile::InsideFloor, pos.x, pos.y);
         Ok(Level { map, width: longest_line_len, height, start_state})
-    }
-    fn as_string(&self) -> String {
-        let mut map = String::new();
-        for line in &self.map {
-            for tile in line {
-                map.push(tile.to_char());
-            }
-            map.push('\n');
-        }
-        map
     }
     fn is_wall(&self, x: i32, y: i32) -> bool {
         if y < 0 || y >= self.height as i32 || x < 0 || x > self.height as i32{

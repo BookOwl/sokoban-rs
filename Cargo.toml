@@ -6,6 +6,7 @@ authors = ["BookOwl <stanleybookowl@gmail.com>"]
 [dependencies]
 fps_clock = "1.0.0"
 lazy_static = "0.2.8"
+tinyfiledialogs = "2.0"
 
 [dependencies.sdl2]
 version = "0.30"

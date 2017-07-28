@@ -1,9 +1,14 @@
 extern crate sdl2;
 extern crate fps_clock;
+extern crate tinyfiledialogs;
 #[macro_use]
 extern crate lazy_static;
 
 use std::cmp::PartialEq;
+use std::io;
+use std::io::prelude::*;
+use std::fs::File;
+use std::env;
 
 use sdl2::video::Window;
 use sdl2::render::Canvas;
@@ -453,7 +458,7 @@ fn init_sdl(app_name: &str, width: u32, height: u32) -> Result<(Canvas<Window>, 
 fn main() {
     // Load all of the game resources and start the game
     let mut level_number: i32 = 0;
-    let parsed_levels = load_levels(LEVELS).unwrap();
+    let mut parsed_levels = load_levels(LEVELS).unwrap();
     let mut game = Game::from_level(parsed_levels[level_number as usize].clone());
     let (mut canvas, mut event_pump, ttf_context) = init_sdl("Sokoban", WIDTH, HEIGHT).unwrap();
     let spritesheet_rw = RWops::from_bytes(&SPRITESHEET_BYTES).unwrap();
@@ -486,6 +491,29 @@ fn main() {
                 // Reset the level if the user pressed Backspace
                 Event::KeyDown { keycode: Some(Keycode::Backspace), .. } => {
                     game = Game::from_level(parsed_levels[level_number as usize].clone());
+                },
+                // Load a new level file if the user pressed L
+                Event::KeyDown { keycode: Some(Keycode::L), .. } => {
+                    if let Some(path) = tinyfiledialogs::open_file_dialog(
+                                            "Select a level file",
+                                            env::current_dir().unwrap().to_str().unwrap(), 
+                                            None) {
+                        println!("loading {}", path);
+                        let mut contents = String::new();
+                        let mut f = File::open(path).unwrap();
+                        f.read_to_string(&mut contents).unwrap();
+                        if let Ok(levels) = load_levels(&contents) {
+                            level_number = 0;
+                            parsed_levels = levels;
+                            game = Game::from_level(parsed_levels[level_number as usize].clone());
+                        } else {
+                            tinyfiledialogs::message_box_ok(
+                                "Error!", 
+                                "Could not load level file", 
+                                tinyfiledialogs::MessageBoxIcon::Error
+                            );
+                        }
+                    }
                 },
                 // Let the game object handle the event
                 event => game.step(&event),
